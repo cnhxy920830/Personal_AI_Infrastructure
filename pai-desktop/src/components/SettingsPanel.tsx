@@ -20,6 +20,12 @@ interface Provider {
   key: keyof Settings;
 }
 
+interface ModelInfo {
+  id: string;
+  name: string;
+  provider: string;
+}
+
 export function SettingsPanel() {
   const { t, locale, setLocale } = useI18nStore();
   
@@ -33,6 +39,7 @@ export function SettingsPanel() {
     default_model: "claude-sonnet-4-20250514",
     voice_enabled: false,
   });
+  const [models, setModels] = useState<ModelInfo[]>([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -53,6 +60,7 @@ export function SettingsPanel() {
 
   useEffect(() => {
     loadSettings();
+    loadModels();
   }, []);
 
   const loadSettings = async () => {
@@ -64,12 +72,22 @@ export function SettingsPanel() {
     }
   };
 
+  const loadModels = async () => {
+    try {
+      const modelList = await invoke<ModelInfo[]>("get_models");
+      setModels(modelList);
+    } catch (error) {
+      console.error("Failed to load models:", error);
+    }
+  };
+
   const handleSave = async () => {
     setSaving(true);
     try {
       await invoke("save_settings", { settings });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
+      loadModels();
     } catch (error) {
       console.error("Failed to save settings:", error);
     } finally {
@@ -209,19 +227,11 @@ export function SettingsPanel() {
               value={settings.default_model}
               onChange={(e) => updateSetting("default_model", (e.target as HTMLSelectElement).value)}
             >
-              <option value="claude-opus-4-20250514">Claude Opus 4</option>
-              <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
-              <option value="claude-haiku-3-20240307">Claude Haiku 3</option>
-              <option value="gpt-4o">GPT-4o</option>
-              <option value="gpt-4o-mini">GPT-4o Mini</option>
-              <option value="o1">OpenAI o1</option>
-              <option value="o1-mini">OpenAI o1-mini</option>
-              <option value="o3-mini">OpenAI o3-mini</option>
-              <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
-              <option value="gemini-2.0-flash-lite">Gemini 2.0 Flash Lite</option>
-              <option value="grok-2">Grok 2</option>
-              <option value="grok-2-vision">Grok 2 Vision</option>
-              <option value="perplexity-llama-3.1-sonar-large-128k-online">Perplexity Llama 3.1</option>
+              {models.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.name} ({model.provider})
+                </option>
+              ))}
             </select>
           </div>
         </div>

@@ -1,7 +1,13 @@
-use crate::{AppState, ChatMessage};
+use crate::{AppState, ChatMessage, MemoryItem};
+use crate::hooks::HookSystem;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use tauri::State;
+
+lazy_static::lazy_static! {
+    static ref HOOK_SYSTEM: Mutex<HookSystem> = Mutex::new(HookSystem::new());
+}
 
 pub fn get_messages_dir() -> PathBuf {
     dirs::data_local_dir()
@@ -26,7 +32,27 @@ pub fn add_message(state: State<'_, AppState>, message: ChatMessage) -> Result<(
     fs::write(&path, json).map_err(|e| e.to_string())?;
 
     let mut messages = state.messages.lock().map_err(|e| e.to_string())?;
-    messages.push(message);
+    messages.push(message.clone());
+
+    let message_count = messages.len();
+    drop(messages);
+
+    if let Ok(hook) = HOOK_SYSTEM.lock() {
+        if hook.should_auto_extract(message_count) {
+            if let Ok(all_messages) = state.messages.lock() {
+                if let Some(settings) = state.settings.lock().ok() {
+                    if let Some(memory) = hook.check_and_extract_memory(&all_messages, &settings) {
+                        drop(all_messages);
+                        if let Ok(mut memories) = state.memories.lock() {
+                            memories.push(memory.clone());
+                            drop(memories);
+                            let _ = crate::memory::save_memory_internal(&memory);
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     Ok(())
 }

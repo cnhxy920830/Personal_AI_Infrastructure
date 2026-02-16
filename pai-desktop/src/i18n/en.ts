@@ -18,11 +18,21 @@ export const en = {
   skills: {
     title: "Skills",
     loading: "Loading skills...",
+    formName: "Skill Name",
+    formDesc: "Description",
+    formContent: "Skill Content (Markdown)",
+    save: "Save",
+    delete: "Delete",
   },
   memory: {
     title: "Memory",
     loading: "Loading memories...",
     empty: "No memories yet. Start chatting to build your memory!",
+    search: "Search memories...",
+    save: "Save",
+    formTitle: "Title",
+    formContent: "Content",
+    all: "All",
   },
   settings: {
     title: "Settings",

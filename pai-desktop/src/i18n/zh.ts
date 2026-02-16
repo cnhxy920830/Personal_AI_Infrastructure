@@ -18,11 +18,21 @@ export const zh = {
   skills: {
     title: "技能",
     loading: "加载技能中...",
+    formName: "技能名称",
+    formDesc: "描述",
+    formContent: "技能内容 (Markdown)",
+    save: "保存",
+    delete: "删除",
   },
   memory: {
     title: "记忆",
     loading: "加载记忆中...",
     empty: "暂无记忆。开始聊天来构建您的记忆吧！",
+    search: "搜索记忆...",
+    save: "保存",
+    formTitle: "标题",
+    formContent: "内容",
+    all: "全部",
   },
   settings: {
     title: "设置",

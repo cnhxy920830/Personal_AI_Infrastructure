@@ -12,8 +12,11 @@ interface Skill {
 export function SkillsPanel() {
   const { t } = useI18nStore();
   const [skills, setSkills] = useState<Skill[]>([]);
-  const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
+  const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newSkill, setNewSkill] = useState({ id: "", name: "", description: "", category: "custom", content: "" });
+  const [skillContent, setSkillContent] = useState("");
 
   useEffect(() => {
     loadSkills();
@@ -25,54 +28,148 @@ export function SkillsPanel() {
       setSkills(skillsData);
     } catch (error) {
       console.error("Failed to load skills:", error);
-      setSkills(getDefaultSkills());
     } finally {
       setLoading(false);
     }
   };
 
-  const getDefaultSkills = (): Skill[] => [
-    { id: "agents", name: "Agents", description: "Dynamic agent composition", category: "core" },
-    { id: "research", name: "Research", description: "Comprehensive research system", category: "core" },
-    { id: "telos", name: "Telos", description: "Life OS and project analysis", category: "core" },
-    { id: "redteam", name: "RedTeam", description: "Security assessment", category: "security" },
-    { id: "recon", name: "Recon", description: "Information gathering", category: "security" },
-    { id: "osint", name: "OSINT", description: "Open source intelligence", category: "security" },
-    { id: "browser", name: "Browser", description: "Browser automation", category: "tools" },
-    { id: "art", name: "Art", description: "Art and image generation", category: "creative" },
-    { id: "documents", name: "Documents", description: "Document processing", category: "tools" },
-    { id: "apify", name: "Apify", description: "Web scraping", category: "tools" },
-    { id: "prompting", name: "Prompting", description: "Prompt engineering", category: "ai" },
-    { id: "fabric", name: "Fabric", description: "AI patterns library", category: "ai" },
-    { id: "evals", name: "Evals", description: "Evaluation system", category: "ai" },
-    { id: "council", name: "Council", description: "Decision committee", category: "ai" },
-    { id: "firstprinciples", name: "First Principles", description: "First principles thinking", category: "ai" },
-    { id: "becreative", name: "BeCreative", description: "Creative brainstorming", category: "creative" },
-    { id: "paiupgrade", name: "PAI Upgrade", description: "Auto upgrade system", category: "system" },
-    { id: "createskill", name: "CreateSkill", description: "Skill creation tool", category: "tools" },
-    { id: "createcli", name: "CreateCLI", description: "CLI creation tool", category: "tools" },
-  ];
+  const handleSkillClick = async (skill: Skill) => {
+    setSelectedSkill(skill);
+    try {
+      const content = await invoke<string>("get_skill_content", { id: skill.id });
+      setSkillContent(content);
+    } catch (error) {
+      setSkillContent(skill.description);
+    }
+  };
+
+  const handleAddSkill = async () => {
+    if (!newSkill.id || !newSkill.name) return;
+    try {
+      await invoke("save_skill", {
+        id: newSkill.id.toLowerCase().replace(/\s+/g, "-"),
+        name: newSkill.name,
+        description: newSkill.description,
+        category: newSkill.category,
+        content: newSkill.content || newSkill.description,
+      });
+      setShowAddForm(false);
+      setNewSkill({ id: "", name: "", description: "", category: "custom", content: "" });
+      loadSkills();
+    } catch (error) {
+      console.error("Failed to save skill:", error);
+    }
+  };
+
+  const handleDeleteSkill = async (skillId: string) => {
+    try {
+      await invoke("delete_skill", { id: skillId });
+      if (selectedSkill?.id === skillId) {
+        setSelectedSkill(null);
+        setSkillContent("");
+      }
+      loadSkills();
+    } catch (error) {
+      console.error("Failed to delete skill:", error);
+    }
+  };
+
+  const categories = [...new Set(skills.map(s => s.category))];
+  const builtinCategories = ["core", "security", "tools", "ai", "creative", "system"];
 
   return (
     <div class="panel">
       <div class="panel-header">
         <h2 class="panel-title">{t.skills.title}</h2>
+        <button class="btn-add" onClick={() => setShowAddForm(!showAddForm)}>
+          {showAddForm ? "✕" : "+"}
+        </button>
       </div>
-      <div class="skills-grid">
+
+      {showAddForm && (
+        <div class="skill-form">
+          <input
+            type="text"
+            placeholder={t.skills.formName || "Skill Name"}
+            value={newSkill.name}
+            onInput={(e) => setNewSkill({...newSkill, name: (e.target as HTMLInputElement).value})}
+            class="input"
+          />
+          <input
+            type="text"
+            placeholder="ID (e.g., my-skill)"
+            value={newSkill.id}
+            onInput={(e) => setNewSkill({...newSkill, id: (e.target as HTMLInputElement).value})}
+            class="input"
+          />
+          <input
+            type="text"
+            placeholder={t.skills.formDesc || "Description"}
+            value={newSkill.description}
+            onInput={(e) => setNewSkill({...newSkill, description: (e.target as HTMLInputElement).value})}
+            class="input"
+          />
+          <select
+            value={newSkill.category}
+            onChange={(e) => setNewSkill({...newSkill, category: (e.target as HTMLSelectElement).value})}
+            class="select"
+          >
+            <option value="custom">Custom</option>
+            <option value="core">Core</option>
+            <option value="ai">AI</option>
+            <option value="tools">Tools</option>
+            <option value="creative">Creative</option>
+            <option value="security">Security</option>
+          </select>
+          <textarea
+            placeholder={t.skills.formContent || "Skill Content (Markdown)"}
+            value={newSkill.content}
+            onInput={(e) => setNewSkill({...newSkill, content: (e.target as HTMLTextAreaElement).value})}
+            class="textarea"
+          />
+          <button class="btn-save" onClick={handleAddSkill}>
+            {t.skills.save || "Save"}
+          </button>
+        </div>
+      )}
+
+      {selectedSkill && (
+        <div class="skill-detail">
+          <div class="skill-detail-header">
+            <div>
+              <h3>{selectedSkill.name}</h3>
+              <span class={`skill-category ${selectedSkill.category}`}>{selectedSkill.category}</span>
+            </div>
+            {!builtinCategories.includes(selectedSkill.category) && (
+              <button class="btn-delete" onClick={() => handleDeleteSkill(selectedSkill.id)}>
+                {t.skills.delete || "Delete"}
+              </button>
+            )}
+          </div>
+          <pre class="skill-content">{skillContent}</pre>
+        </div>
+      )}
+
+      <div class="skills-list">
         {loading ? (
           <div>{t.skills.loading}</div>
-        ) : (
-          skills.map((skill) => (
-            <div
-              key={skill.id}
-              class={`skill-card ${selectedSkill === skill.id ? "selected" : ""}`}
-              onClick={() => setSelectedSkill(skill.id)}
-            >
-              <div class="skill-name">{skill.name}</div>
-              <div class="skill-description">{skill.description}</div>
+        ) : categories.map(category => (
+          <div key={category} class="skill-category-group">
+            <h4 class="category-title">{category}</h4>
+            <div class="skills-grid">
+              {skills.filter(s => s.category === category).map(skill => (
+                <div
+                  key={skill.id}
+                  class={`skill-card ${selectedSkill?.id === skill.id ? "selected" : ""}`}
+                  onClick={() => handleSkillClick(skill)}
+                >
+                  <div class="skill-name">{skill.name}</div>
+                  <div class="skill-description">{skill.description}</div>
+                </div>
+              ))}
             </div>
-          ))
-        )}
+          </div>
+        ))}
       </div>
     </div>
   );

@@ -4,6 +4,13 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct ModelInfo {
+    pub id: String,
+    pub name: String,
+    pub provider: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct AnthropicRequest {
     model: String,
     messages: Vec<AnthropicMessage>,
@@ -92,6 +99,264 @@ fn get_model_provider(model: &str) -> &'static str {
 }
 
 #[tauri::command]
+pub async fn get_models(state: State<'_, AppState>) -> Result<Vec<ModelInfo>, String> {
+    let api_keys = {
+        let settings = state.settings.lock().map_err(|e| e.to_string())?;
+        SettingsApiKeys {
+            anthropic: settings.anthropic_api_key.clone(),
+            openai: settings.openai_api_key.clone(),
+            google: settings.google_api_key.clone(),
+            xai: settings.xai_api_key.clone(),
+            perplexity: settings.perplexity_api_key.clone(),
+        }
+    };
+
+    let mut models = Vec::new();
+    let client = Client::new();
+
+    if !api_keys.anthropic.is_empty() {
+        match fetch_anthropic_models(&client, &api_keys.anthropic).await {
+            Ok(m) => models.extend(m),
+            Err(e) => println!("Failed to fetch Anthropic models: {}", e),
+        }
+    }
+
+    if !api_keys.openai.is_empty() {
+        match fetch_openai_models(&client, &api_keys.openai).await {
+            Ok(m) => models.extend(m),
+            Err(e) => println!("Failed to fetch OpenAI models: {}", e),
+        }
+    }
+
+    if !api_keys.google.is_empty() {
+        match fetch_google_models(&client, &api_keys.google).await {
+            Ok(m) => models.extend(m),
+            Err(e) => println!("Failed to fetch Google models: {}", e),
+        }
+    }
+
+    if !api_keys.xai.is_empty() {
+        match fetch_xai_models(&client, &api_keys.xai).await {
+            Ok(m) => models.extend(m),
+            Err(e) => println!("Failed to fetch xAI models: {}", e),
+        }
+    }
+
+    if !api_keys.perplexity.is_empty() {
+        match fetch_perplexity_models(&client, &api_keys.perplexity).await {
+            Ok(m) => models.extend(m),
+            Err(e) => println!("Failed to fetch Perplexity models: {}", e),
+        }
+    }
+
+    if models.is_empty() {
+        models.extend(vec![
+            ModelInfo { id: "claude-sonnet-4-20250514".to_string(), name: "Claude Sonnet 4 (请先配置API Key)".to_string(), provider: "Anthropic".to_string() },
+            ModelInfo { id: "gpt-4o".to_string(), name: "GPT-4o (请先配置API Key)".to_string(), provider: "OpenAI".to_string() },
+        ]);
+    }
+
+    Ok(models)
+}
+
+async fn fetch_anthropic_models(client: &Client, api_key: &str) -> Result<Vec<ModelInfo>, String> {
+    let response = client
+        .get("https://api.anthropic.com/v1/models")
+        .header("x-api-key", api_key)
+        .header("anthropic-version", "2023-06-01")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(format!("HTTP error: {}", response.status()));
+    }
+
+    let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+    
+    let mut models = Vec::new();
+    if let Some(data) = json.get("data").and_then(|d| d.as_array()) {
+        for model in data {
+            if let (Some(id), Some(display_name)) = (
+                model.get("id").and_then(|v| v.as_str()),
+                model.get("display_name").and_then(|v| v.as_str())
+            ) {
+                if !id.contains("claude-") && !id.contains("sonnet") && !id.contains("haiku") && !id.contains("opus") {
+                    continue;
+                }
+                models.push(ModelInfo {
+                    id: id.to_string(),
+                    name: display_name.to_string(),
+                    provider: "Anthropic".to_string(),
+                });
+            }
+        }
+    }
+
+    if models.is_empty() {
+        return Err("Failed to fetch Anthropic models - please check your API key".to_string());
+    }
+
+    Ok(models)
+}
+
+async fn fetch_openai_models(client: &Client, api_key: &str) -> Result<Vec<ModelInfo>, String> {
+    let response = client
+        .get("https://api.openai.com/v1/models")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(format!("HTTP error: {}", response.status()));
+    }
+
+    let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+    
+    let mut models = Vec::new();
+    if let Some(data) = json.get("data").and_then(|d| d.as_array()) {
+        for model in data {
+            if let Some(id) = model.get("id").and_then(|v| v.as_str()) {
+                let filter_models = ["gpt-4o", "gpt-4", "gpt-3.5", "o1", "o3", "o4"];
+                if !filter_models.iter().any(|f| id.contains(f)) {
+                    continue;
+                }
+                let name = model.get("human_name").and_then(|v| v.as_str()).unwrap_or(id);
+                models.push(ModelInfo {
+                    id: id.to_string(),
+                    name: name.to_string(),
+                    provider: "OpenAI".to_string(),
+                });
+            }
+        }
+    }
+
+    models.sort_by(|a, b| {
+        let priority = |id: &str| {
+            if id.contains("4o") { 0 }
+            else if id.contains("o1") { 1 }
+            else if id.contains("o3") { 2 }
+            else if id.contains("4") { 3 }
+            else { 4 }
+        };
+        priority(&a.id).cmp(&priority(&b.id))
+    });
+
+    Ok(models)
+}
+
+async fn fetch_google_models(client: &Client, api_key: &str) -> Result<Vec<ModelInfo>, String> {
+    let response = client
+        .get(&format!("https://generativelanguage.googleapis.com/v1/models?key={}", api_key))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(format!("HTTP error: {}", response.status()));
+    }
+
+    let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+    
+    let mut models = Vec::new();
+    if let Some(data) = json.get("models").and_then(|d| d.as_array()) {
+        for model in data {
+            if let Some(name) = model.get("name").and_then(|v| v.as_str()) {
+                if !name.contains("gemini") {
+                    continue;
+                }
+                let model_id = name.replace("models/", "");
+                let display_name = model_id.replace("-", " ");
+                models.push(ModelInfo {
+                    id: model_id,
+                    name: display_name,
+                    provider: "Google".to_string(),
+                });
+            }
+        }
+    }
+
+    if models.is_empty() {
+        return Err("Failed to fetch Google models - please check your API key".to_string());
+    }
+
+    Ok(models)
+}
+
+async fn fetch_xai_models(client: &Client, api_key: &str) -> Result<Vec<ModelInfo>, String> {
+    let response = client
+        .get("https://api.x.ai/v1/models")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(format!("HTTP error: {}", response.status()));
+    }
+
+    let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+    
+    let mut models = Vec::new();
+    if let Some(data) = json.get("data").and_then(|d| d.as_array()) {
+        for model in data {
+            if let Some(id) = model.get("id").and_then(|v| v.as_str()) {
+                let name = model.get("human_name").and_then(|v| v.as_str()).unwrap_or(id);
+                models.push(ModelInfo {
+                    id: id.to_string(),
+                    name: name.to_string(),
+                    provider: "xAI".to_string(),
+                });
+            }
+        }
+    }
+
+    if models.is_empty() {
+        return Err("Failed to fetch xAI models - please check your API key".to_string());
+    }
+
+    Ok(models)
+}
+
+async fn fetch_perplexity_models(client: &Client, api_key: &str) -> Result<Vec<ModelInfo>, String> {
+    let response = client
+        .get("https://api.perplexity.ai/models")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(format!("HTTP error: {}", response.status()));
+    }
+
+    let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+    
+    let mut models = Vec::new();
+    if let Some(data) = json.get("data").and_then(|d| d.as_array()) {
+        for model in data {
+            if let (Some(id), Some(name)) = (
+                model.get("id").and_then(|v| v.as_str()),
+                model.get("name").and_then(|v| v.as_str())
+            ) {
+                models.push(ModelInfo {
+                    id: id.to_string(),
+                    name: name.to_string(),
+                    provider: "Perplexity".to_string(),
+                });
+            }
+        }
+    }
+
+    if models.is_empty() {
+        return Err("Failed to fetch Perplexity models - please check your API key".to_string());
+    }
+
+    Ok(models)
+}
+
+#[tauri::command]
 pub async fn chat(
     state: State<'_, AppState>,
     message: String,
@@ -166,23 +431,63 @@ fn build_context(state: &AppState) -> Result<String, String> {
 
     let mut context = String::new();
 
-    if !memories.is_empty() {
-        context.push_str("## Relevant Memories\n");
-        for memory in memories.iter().take(5) {
-            context.push_str(&format!("- {}\n", memory.title));
+    if let Some(last_user_msg) = messages.iter().rev().find(|m| m.role == "user") {
+        let query = extract_keywords(&last_user_msg.content);
+        if !query.is_empty() {
+            let relevant: Vec<_> = memories
+                .iter()
+                .filter(|m| {
+                    m.title.to_lowercase().contains(&query)
+                        || m.tags.iter().any(|t| t.to_lowercase().contains(&query))
+                        || m.entities.iter().any(|e| e.to_lowercase().contains(&query))
+                })
+                .take(5)
+                .collect();
+
+            if !relevant.is_empty() {
+                context.push_str("## Relevant Memories\n");
+                for memory in &relevant {
+                    context.push_str(&format!("### {}\n{}\n\n", memory.title, memory.content));
+                }
+            }
         }
-        context.push('\n');
     }
 
-    let recent_messages: Vec<_> = messages.iter().rev().take(10).collect();
-    if !recent_messages.is_empty() {
+    if memories.is_empty() && !messages.is_empty() {
         context.push_str("## Recent Conversation\n");
-        for msg in recent_messages.iter().rev() {
+        let recent: Vec<_> = messages.iter().rev().take(10).collect();
+        for msg in recent.iter().rev() {
             context.push_str(&format!("{}: {}\n", msg.role, msg.content));
         }
     }
 
     Ok(context)
+}
+
+fn extract_keywords(text: &str) -> String {
+    let stop_words = ["the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+        "have", "has", "had", "do", "does", "did", "will", "would", "could", "should",
+        "may", "might", "must", "shall", "can", "need", "dare", "ought", "used", "to",
+        "of", "in", "for", "on", "with", "at", "by", "from", "as", "into", "through",
+        "during", "before", "after", "above", "below", "between", "under", "again",
+        "further", "then", "once", "here", "there", "when", "where", "why", "how",
+        "all", "each", "few", "more", "most", "other", "some", "such", "no", "nor",
+        "not", "only", "own", "same", "so", "than", "too", "very", "just", "and",
+        "but", "if", "or", "because", "until", "while", "this", "that", "these",
+        "those", "what", "which", "who", "whom", "i", "you", "he", "she", "it", "we",
+        "they", "me", "him", "her", "us", "them", "my", "your", "his", "its", "our",
+        "their", "mine", "yours", "hers", "ours", "theirs", "请", "帮我", "给我",
+        "我想", "你能", "可以", "这个", "那个", "什么", "怎么", "如何", "为什么"];
+
+    let words: Vec<String> = text
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|s| s.len() > 2)
+        .filter(|s| !stop_words.contains(s))
+        .map(|s| s.to_string())
+        .collect();
+
+    words.join(" ")
 }
 
 async fn chat_anthropic(

@@ -1,8 +1,12 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 
+pub mod algorithm;
 pub mod ai;
+pub mod hooks;
 pub mod memory;
+pub mod messages;
+pub mod session;
 pub mod settings;
 pub mod skills;
 
@@ -54,6 +58,36 @@ pub struct MemoryItem {
     pub content: String,
     pub memory_type: String,
     pub timestamp: i64,
+    pub tags: Vec<String>,
+    pub entities: Vec<String>,
+    pub confidence: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RelationshipNote {
+    pub note_type: String,
+    pub content: String,
+    pub entity: String,
+    pub timestamp: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkItem {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub status: String,
+    pub created_at: i64,
+    pub completed_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LearningItem {
+    pub id: String,
+    pub title: String,
+    pub content: String,
+    pub source: String,
+    pub timestamp: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,5 +100,11 @@ pub struct Skill {
 
 pub use ai::chat;
 pub use settings::{get_settings, save_settings};
-pub use skills::get_skills;
-pub use memory::get_memories;
+pub use skills::{get_skills, save_skill, get_skill_content, delete_skill};
+pub use session::{get_current_session, create_new_session, list_sessions, switch_session, delete_session, rename_session};
+pub use memory::{
+    get_memories, save_memory, delete_memory, load_memories_from_disk,
+    search_memories, save_relationship_note, get_relationship_notes,
+    save_work_item, get_work_items, complete_work_item,
+    save_prd, get_prds,
+};

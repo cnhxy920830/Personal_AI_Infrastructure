@@ -1,6 +1,25 @@
 use crate::Skill;
+use std::fs;
+use std::path::PathBuf;
+
+pub fn get_skills_dir() -> PathBuf {
+    dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("PAI")
+        .join("skills")
+}
 
 pub fn get_all_skills() -> Vec<Skill> {
+    let mut skills = get_builtin_skills();
+    
+    if let Ok(custom) = get_custom_skills() {
+        skills.extend(custom);
+    }
+    
+    skills
+}
+
+pub fn get_builtin_skills() -> Vec<Skill> {
     vec![
         Skill {
             id: "agents".to_string(),
@@ -125,7 +144,111 @@ pub fn get_all_skills() -> Vec<Skill> {
     ]
 }
 
+fn get_custom_skills() -> Result<Vec<Skill>, String> {
+    let skills_dir = get_skills_dir();
+    
+    if !skills_dir.exists() {
+        fs::create_dir_all(&skills_dir).map_err(|e| e.to_string())?;
+        return Ok(Vec::new());
+    }
+
+    let mut skills = Vec::new();
+    
+    let entries = fs::read_dir(&skills_dir).map_err(|e| e.to_string())?;
+    
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().map_or(false, |ext| ext == "md") || path.extension().map_or(false, |ext| ext == "yaml") {
+            if let Ok(content) = fs::read_to_string(&path) {
+                if let Some(skill) = parse_skill_file(&path, &content) {
+                    skills.push(skill);
+                }
+            }
+        }
+    }
+
+    Ok(skills)
+}
+
+fn parse_skill_file(path: &PathBuf, content: &str) -> Option<Skill> {
+    let id = path.file_stem()?.to_str()?.to_string();
+    
+    let mut name = id.clone();
+    let mut description = String::new();
+    let mut category = "custom".to_string();
+    
+    if content.starts_with("---") {
+        if let Some(end) = content.find("---") {
+            let frontmatter = &content[3..end];
+            for line in frontmatter.lines() {
+                let line = line.trim();
+                if line.starts_with("name:") {
+                    name = line[5..].trim().to_string();
+                } else if line.starts_with("description:") {
+                    description = line[12..].trim().to_string();
+                } else if line.starts_with("category:") {
+                    category = line[9..].trim().to_string();
+                }
+            }
+        }
+    } else {
+        if let Some(first_line) = content.lines().next() {
+            if first_line.starts_with("# ") {
+                name = first_line[2..].trim().to_string();
+            }
+        }
+        description = content.lines().skip(1).take(2).collect::<Vec<_>>().join(" ");
+    }
+
+    Some(Skill {
+        id,
+        name,
+        description,
+        category,
+    })
+}
+
 #[tauri::command]
 pub fn get_skills() -> Vec<Skill> {
     get_all_skills()
+}
+
+#[tauri::command]
+pub fn save_skill(id: String, name: String, description: String, category: String, content: String) -> Result<(), String> {
+    let skills_dir = get_skills_dir();
+    fs::create_dir_all(&skills_dir).map_err(|e| e.to_string())?;
+
+    let skill_content = format!(
+        "---\nname: {}\ndescription: {}\ncategory: {}\n---\n\n{}",
+        name, description, category, content
+    );
+
+    let path = skills_dir.join(format!("{}.md", id));
+    fs::write(&path, skill_content).map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_skill_content(id: String) -> Result<String, String> {
+    let skills_dir = get_skills_dir();
+    let path = skills_dir.join(format!("{}.md", id));
+    
+    if path.exists() {
+        fs::read_to_string(&path).map_err(|e| e.to_string())
+    } else {
+        Err("Skill not found".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn delete_skill(id: String) -> Result<(), String> {
+    let skills_dir = get_skills_dir();
+    let path = skills_dir.join(format!("{}.md", id));
+    
+    if path.exists() {
+        fs::remove_file(&path).map_err(|e| e.to_string())
+    } else {
+        Err("Skill not found".to_string())
+    }
 }
